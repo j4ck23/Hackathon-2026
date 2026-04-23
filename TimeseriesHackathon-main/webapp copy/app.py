@@ -1,3 +1,5 @@
+from pyexpat import features
+
 from flask import Flask, jsonify, render_template, request
 import xgboost as xgb
 from sklearn.datasets import make_regression
@@ -93,40 +95,48 @@ def runModelGlobal():
     #--------------------------------------------------------------------------------------------------LSTM model----------------------------------------------------------------------------
 
     df1 = df.copy()
-    for col in features:
-        if df1[col].dtype == "object" or str(df1[col].dtype) == "category":
-            le = LabelEncoder()
-            df1[col] = le.fit_transform(df1[col])
+    df1 = df1.sort_values('Year')
 
-    X_data = df1[features].values
-    y_data = df1["Crop_Yield"].values.reshape(-1, 1)
+    categorical_cols = df1.select_dtypes(include=["object", "category"]).columns.tolist() # Get the list of categorical columns in the DataFrame
+    df1 = pd.get_dummies(df1, columns=categorical_cols) # Convert categorical columns to dummy variables (one-hot encoding)
+
+    train_df_lstm = df1[df1['Year'] < split_year] # Filter the DataFrame to include only rows where the "Year" column is less than the split_year - repeated from early to not mess with the results of the XGBoost model
+    test_df_lstm  = df1[df1['Year'] >= split_year]
+
+    train_df_lstm, test_df_lstm = train_df_lstm.align(test_df_lstm, join='left', axis=1, fill_value=0) # Align the train and test DataFrames to have the same columns, filling missing values with 0
+    features_lstm = [col for col in train_df_lstm.columns if col not in ["Crop_Yield",]] # Get the list of feature columns for the LSTM model, excluding "Crop_Yield" 
+    X_train_raw = train_df_lstm[features_lstm].values # Extract the feature values for the training set as a NumPy array
+    X_test_raw  = test_df_lstm[features_lstm].values
+
+    y_train_raw = train_df_lstm["Crop_Yield"].values.reshape(-1, 1) # Extract the target variable values for the training set as a NumPy array and reshape to be a 2D array with one column
+    y_test_raw  = test_df_lstm["Crop_Yield"].values.reshape(-1, 1)
+
     feature_scaler = MinMaxScaler()
-    X_scaled = feature_scaler.fit_transform(X_data)
+    X_train_scaled = feature_scaler.fit_transform(X_train_raw) # Scale the feature values for the training set to be between 0 and 1 using MinMaxScaler
+    X_test_scaled  = feature_scaler.transform(X_test_raw)
+
     target_scaler = MinMaxScaler()
-    y_scaled = target_scaler.fit_transform(y_data)
+    y_train_scaled = target_scaler.fit_transform(y_train_raw)
+    y_test_scaled  = target_scaler.transform(y_test_raw)
 
-    look_back = look_back = max(1, df["Year"].max() - split_year) # Set look_back to the number of years in the test set, or at least 1
-    split_index = int(len(X_scaled) * 0.7)
+    look_back = max(1, min(5, len(train_df_lstm) // 3)) # Set the look_back parameter to be between 1 and 5, or less if the training set is very small
 
-    X_train_raw = X_scaled[:split_index]
-    X_test_raw  = X_scaled[split_index:]
+    X_combined = np.vstack((X_train_scaled[-look_back:], X_test_scaled))
+    y_combined = np.vstack((y_train_scaled[-look_back:], y_test_scaled))
 
-    y_train_raw = y_scaled[:split_index]
-    y_test_raw  = y_scaled[split_index:]
-
-    X_lin_train, y_lin_train = pre_process(X_train_raw, y_train_raw, look_back)
-    X_lin_test, y_lin_test   = pre_process(X_test_raw, y_test_raw, look_back)
+    X_lstm_train, y_lstm_train = pre_process(X_train_scaled, y_train_scaled, look_back)
+    X_lstm_test, y_lstm_test = pre_process(X_combined, y_combined, look_back)
 
     model_LSTM = Sequential()
-    model_LSTM.add(LSTM(16, input_shape=(X_lin_train.shape[1], X_lin_train.shape[2])))
+    model_LSTM.add(LSTM(16, input_shape=(X_lstm_train.shape[1], X_lstm_train.shape[2])))
     model_LSTM.add(Dense(8))
     model_LSTM.add(Dense(1))
     model_LSTM.compile(loss='mean_squared_error', optimizer='adam')
-    model_LSTM.fit(X_lin_train, y_lin_train, epochs=100, batch_size=10, verbose=2)
+    model_LSTM.fit(X_lstm_train, y_lstm_train, epochs=100, batch_size=50, verbose=2)
 
-    pred = model_LSTM.predict(X_lin_test)
-    pred_transform = target_scaler.inverse_transform(pred).flatten()
-    te = target_scaler.inverse_transform(y_lin_test.reshape(-1,1)).flatten()
+    pred = model_LSTM.predict(X_lstm_test)
+    pred_transform = target_scaler.inverse_transform(pred)
+    te = target_scaler.inverse_transform(y_lstm_test.reshape(-1,1))
     LSTM_rmse = np.sqrt(sklearn.metrics.mean_squared_error(te, pred_transform))
     LSTM_r2 = sklearn.metrics.r2_score(te, pred_transform)
 
@@ -157,8 +167,8 @@ def runModelGlobal():
 
     results_LSTM = [
         {"index": i, 
-         "actual": round(float(te[i]), 2), 
-         "predicted": round(float(pred_transform[i]), 2)
+         "actual": round(float(te[i][0]), 2), 
+         "predicted": round(float(pred_transform[i][0]), 2)
         }
         for i in range(min(50, len(te)))
     ]
