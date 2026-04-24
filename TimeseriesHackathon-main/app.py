@@ -195,12 +195,12 @@ def runModelGlobal():
 
     # metrics
     metrics = {
-        "r2": round(r2, 4),
-        "mse": round(mse, 4),
+        "XGBoost_r2": round(r2, 4),
+        "XGBoost_mse": round(mse, 4),
         "LSTM_rmse": round(LSTM_rmse, 4),
         "LSTM_r2": round(LSTM_r2, 4),
-        "lin_r2": round(lin_r2, 4),
-        "lin_mse": round(lin_mse, 4)
+        "LinearRegression_r2": round(lin_r2, 4),
+        "LinearRegression_mse": round(lin_mse, 4)
     }
 
     #feature importance results
