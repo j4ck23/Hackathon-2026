@@ -158,7 +158,7 @@
       return (
         <div>
           <h1>Group 1 Hackathon Spring Week</h1>
-          <h4>Choose the temporal split and the feature set, then run XGBoost on the full global dataset.</h4>
+          <h4>Choose the temporal split, the feature set, what to predict and then runs XGBoost, LSTM and Linear Regression.</h4>
           <h4>Split semantics: train on years &lt; split year  test on years &gt;=  split year. <p>Years: 1990-2013 </p> </h4>
           {/* Number input — onChange updates the seed state as the user types */}
           <label>
@@ -231,7 +231,7 @@
           {results.length > 0 && (
             <div>
 
-              <h2>Predictions vs Actuals</h2>
+              <h2>XGBoost Predictions vs Actuals</h2>
               {/* ResponsiveContainer makes the chart fill its parent width */}
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={results}>
